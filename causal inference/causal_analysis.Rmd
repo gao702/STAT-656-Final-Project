@@ -76,7 +76,7 @@ head(X_control)
 
 
 ```{r}
-element_prod <- function(input_matrix, vector){
+element_prod_row <- function(input_matrix, vector){
   row_num = nrow(input_matrix)
   col_num = ncol(input_matrix)
   output_matrix = matrix(nrow=row_num, ncol=col_num)
@@ -85,45 +85,57 @@ element_prod <- function(input_matrix, vector){
   }
   output_matrix
 }
+
+element_prod_col <- function(input_matrix, vector){
+  row_num = nrow(input_matrix)
+  col_num = ncol(input_matrix)
+  output_matrix = matrix(nrow=row_num, ncol=col_num)
+  for (j in 1:col_num){
+    output_matrix[, j] = input_matrix[, j] * vector
+  }
+  output_matrix
+}
 ```
 
 
 # initialize models
 ```{r}
-# # outcome model 1 - bayesian linear regression
-# outcome_normal_code = "
-# data {
-# int<lower=0> N;      // number of data items
-# int<lower=0> N_test;   // number of test data items
-# int<lower=0> K;       // number of predictors
-# real<lower=0> pr_sd; // std dev of the prior
-# matrix[N, K] x;       // predictor matrix
-# real y[N];          // output vector
-# matrix[N_test, K] x_test;   // predictor matrix
-# }
-# 
-# parameters {
-#   vector[K] beta;       // coefficients for predictors
-#   real<lower=0> sigma;  // error scale
-# }
-# 
-# transformed parameters {
-#   vector[N] mu = x * beta;
-# }
-# 
-# model {
-#   beta ~ normal(0,pr_sd);  // Note: beta is k-dim
-#   sigma ~ inv_gamma(0.001,0.001);  // Close to a flat prior
-#   y ~ normal(mu,sigma);  // likelihood
-# }
-# 
-# generated quantities {
-#   real y_rep[N_test];
-#   y_rep = normal_rng(x_test * beta, sigma);
-# } "
-# 
-# outcome_normal = stan_model(model_code=outcome_normal_code)
+# outcome model 1 - bayesian linear regression
+outcome_normal_code = "
+data {
+int<lower=0> N;      // number of data items
+int<lower=0> N_test;   // number of test data items
+int<lower=0> K;       // number of predictors
+real<lower=0> pr_sd; // std dev of the prior
+matrix[N, K] x;       // predictor matrix
+real y[N];          // output vector
+matrix[N_test, K] x_test;   // predictor matrix
+}
+
+parameters {
+  vector[K] beta;       // coefficients for predictors
+  real<lower=0> sigma2;  // error scale
+}
+
+transformed parameters {
+  vector[N] mu = x * beta;
+  real<lower=0> sigma = sqrt(sigma2);
+}
+
+model {
+  beta ~ normal(0, pr_sd);  // Note: beta is k-dim
+  sigma2 ~ inv_gamma(0.001,0.001);  // Close to a flat prior
+  y ~ normal(mu,sigma);  // likelihood
+}
+
+generated quantities {
+  real y_rep[N_test];
+  y_rep = normal_rng(x_test * beta, sigma);
+} "
+
+outcome_normal = stan_model(model_code=outcome_normal_code)
 ```
+
 
 
 ```{r}
@@ -165,18 +177,20 @@ ps_logis = stan_model(model_code=ps_logis_code)
 # causal estimate
 ```{r}
 dr_estimate <- function(y, t, y0_pred, y1_pred, ps){
-  y_pred = element_prod(y0_pred, 1-t) + element_prod(y1_pred, t)
-  ps_pred = element_prod(1-ps, 1-t) + element_prod(ps, t) 
+  y_pred = element_prod_row(y0_pred, 1-t) + element_prod_row(y1_pred, t)
+  ps_pred = element_prod_row(1-ps, 1-t) + element_prod_row(ps, t) 
   temp1 = y1_pred - y0_pred
   temp2 = y - y_pred
-  dr = temp1 + temp2/ps_pred
+  dr_estimate = temp1 + temp2/ps_pred
+  
+  dr_estimate
 }
 ```
 
 
 # propensity score model
 ```{r}
-ps_data <- list(N = nrow(X), K = ncol(X), pr_sd = 10, x=X, y=t)
+ps_data <- list(N = nrow(X), K = ncol(X), pr_sd = 3, x=X, y=t)
 ps_fit <- sampling(ps_logis, data=ps_data, iter=5000, warmup=4000, chains=1)
 ```
 
@@ -213,6 +227,7 @@ ppc_stat(y=t,yrep=y_rep)+ggplot2::labs(x = "Proportion of 1's in observed and Pr
 
 
 # outcome models
+
 ## math
 ```{r}
 y <- data$math_log
@@ -221,47 +236,87 @@ y_control <- y[control_ind]
 ```
 
 
-
+### bayesian linear regression
 ```{r}
-### bayesian linear regression model
-# math_outcome_treat <- list(N = nrow(X_treat), 
-#                            N_test = nrow(X),
-#                            K = ncol(X_treat), 
-#                            pr_sd = 10, 
-#                            x = X_treat, 
-#                            y = y_treat,
-#                            x_test = X)
-# math_outcome_treat_regress <- sampling(outcome_normal, data=math_outcome_treat, iter=5000, warmup=4000, chains=4)
+# treatment group: fit model
+math_outcome_treat <- list(N = nrow(X_treat),
+                           N_test = nrow(X),
+                           K = ncol(X_treat),
+                           pr_sd = 3,
+                           x = X_treat,
+                           y = y_treat,
+                           x_test = X)
+math_outcome_treat_BLR <- sampling(outcome_normal, data=math_outcome_treat, iter=5000, warmup=4000, chains=1)
 ```
 
 
 ```{r}
-# # check mixing
-# class(math_outcome_treat_regress)
-# post_smp <- as.data.frame(math_outcome_treat_regress)
-# colnames(post_smp)[1:5] <- colnames(X)
-# 
-# mcmc_areas(post_smp[,1:5], pars = colnames(X)[1:5], prob = 0.8)
-# 
-# plot(post_smp$gender, type='l')
-# plot(post_smp$family_class, type='l')
-# plot(post_smp$tech_access, type='l')
+# treatment group: check mixing
+class(math_outcome_treat_BLR)
+post_smp <- as.data.frame(math_outcome_treat_BLR)
+colnames(post_smp)[1:5] <- colnames(X)
+ 
+mcmc_areas(post_smp[,1:5], pars = colnames(X)[1:5], prob = 0.8)
+ 
+plot(post_smp$gender, type='l')
+plot(post_smp$family_class, type='l')
+plot(post_smp$tech_access, type='l')
 ```
 
 
 ```{r}
-# # predictive check
-# y1_pred <- extract(math_outcome_treat_regress)$y_rep
-# 
-# ppd_intervals(y1_pred[ ,treat_ind], x=y[treat_ind]) + geom_abline(intercept = 0, slope = 1)  +
-#   ggplot2::labs(y = "Predicted y's", x = "Observed y's")
-# 
-# ppd_intervals(t(t(y1_pred[ ,treat_ind])-y[treat_ind]),x=y[treat_ind]) + geom_abline(intercept = 0, slope = 0)  +
-#   ggplot2::labs(y = "Errors in predicted y's", x = "Observed y's")
+# treatment group: predictive check
+y1_pred <- extract(math_outcome_treat_BLR)$y_rep
+ 
+ppd_intervals(y1_pred[ ,treat_ind], x=y[treat_ind]) + geom_abline(intercept = 0, slope = 1)  +
+   ggplot2::labs(y = "Predicted y's", x = "Observed y's")
+ 
+ppd_intervals(t(t(y1_pred[ ,treat_ind])-y[treat_ind]),x=y[treat_ind]) + geom_abline(intercept = 0, slope = 0)  +
+   ggplot2::labs(y = "Errors in predicted y's", x = "Observed y's")
 ```
 
 ```{r}
-math_outcome_treat <- wbart(x.train=as.matrix(X_treat[1:5]), 
+# control group: fit model
+math_outcome_control <- list(N = nrow(X_control),
+                           N_test = nrow(X),
+                           K = ncol(X_control),
+                           pr_sd = 3,
+                           x = X_control,
+                           y = y_control,
+                           x_test = X)
+math_outcome_control_BLR <- sampling(outcome_normal, data=math_outcome_control, iter=5000, warmup=4000, chains=1)
+```
+
+```{r}
+# control group: check mixing
+class(math_outcome_control_BLR)
+post_smp <- as.data.frame(math_outcome_control_BLR)
+colnames(post_smp)[1:5] <- colnames(X)
+ 
+mcmc_areas(post_smp[,1:5], pars = colnames(X)[1:5], prob = 0.8)
+ 
+plot(post_smp$gender, type='l')
+plot(post_smp$family_class, type='l')
+plot(post_smp$tech_access, type='l')
+```
+
+```{r}
+# control group: predictive check
+y0_pred <- extract(math_outcome_control_BLR)$y_rep
+ 
+ppd_intervals(y0_pred[ ,control_ind], x=y[control_ind]) + geom_abline(intercept = 0, slope = 1)  +
+   ggplot2::labs(y = "Predicted y's", x = "Observed y's")
+ 
+ppd_intervals(t(t(y0_pred[ ,control_ind])-y[control_ind]),x=y[control_ind]) + geom_abline(intercept = 0, slope = 0)  +
+   ggplot2::labs(y = "Errors in predicted y's", x = "Observed y's")
+```
+
+
+### BART
+
+```{r}
+# treatment group: fit model
+math_outcome_treat_BART <- wbart(x.train=as.matrix(X_treat[1:5]), 
                             y.train = y_treat, 
                             x.test=as.matrix(X[1:5]),
                             w=data_AUS$stu_wgt)
@@ -269,8 +324,8 @@ math_outcome_treat <- wbart(x.train=as.matrix(X_treat[1:5]),
 
 
 ```{r}
-# predictive check
-y1_pred <- math_outcome_treat$yhat.test
+# treatment group: predictive check
+y1_pred <- math_outcome_treat_BART$yhat.test
 
 ppd_intervals(y1_pred[ ,treat_ind],x=y[treat_ind]) + geom_abline(intercept = 0, slope = 1)  +
   ggplot2::labs(y = "Predicted y's", x = "Observed y's", title="Math: Predictive check for treatment group")
@@ -280,10 +335,9 @@ ppd_intervals(t(t(y1_pred[ ,treat_ind])-y[treat_ind]),x=y[treat_ind]) + geom_abl
 ```
 
 
-BART is slightly better than bayesian linear regression model (smaller variance) - use BART as outcome modeling.
-
 ```{r}
-math_outcome_control <- wbart(x.train=as.matrix(X_control[1:5]), 
+# control group: fit model
+math_outcome_control_BART <- wbart(x.train=as.matrix(X_control[1:5]), 
                               y.train = y_control, 
                               x.test=as.matrix(X[1:5]), 
                               w=data_AUS$stu_wgt)
@@ -291,8 +345,8 @@ math_outcome_control <- wbart(x.train=as.matrix(X_control[1:5]),
 
 
 ```{r}
-# predictive check
-y0_pred <- math_outcome_control$yhat.test
+# control group: predictive check
+y0_pred <- math_outcome_control_BART$yhat.test
 
 ppd_intervals(y0_pred[ ,control_ind],x=y[control_ind]) + geom_abline(intercept = 0, slope = 1)  +
   ggplot2::labs(y = "Predicted y's", x = "Observed y's", title="Math: Predictive check for control group")
@@ -308,9 +362,86 @@ y_treat <- y[treat_ind]
 y_control <- y[control_ind]
 ```
 
+### bayesian linear regression
+```{r}
+# treatment group: fit model
+read_outcome_treat <- list(N = nrow(X_treat),
+                           N_test = nrow(X),
+                           K = ncol(X_treat),
+                           pr_sd = 3,
+                           x = X_treat,
+                           y = y_treat,
+                           x_test = X)
+read_outcome_treat_BLR <- sampling(outcome_normal, data=read_outcome_treat, iter=5000, warmup=4000, chains=1)
+```
+
 
 ```{r}
-read_outcome_treat <- wbart(x.train=as.matrix(X_treat[1:5]), 
+# treatment group: check mixing
+class(read_outcome_treat_BLR)
+post_smp <- as.data.frame(read_outcome_treat_BLR)
+colnames(post_smp)[1:5] <- colnames(X)
+ 
+mcmc_areas(post_smp[,1:5], pars = colnames(X)[1:5], prob = 0.8)
+ 
+plot(post_smp$gender, type='l')
+plot(post_smp$family_class, type='l')
+plot(post_smp$tech_access, type='l')
+```
+
+
+```{r}
+# treatment group: predictive check
+y1_pred <- extract(read_outcome_treat_BLR)$y_rep
+ 
+ppd_intervals(y1_pred[ ,treat_ind], x=y[treat_ind]) + geom_abline(intercept = 0, slope = 1)  +
+   ggplot2::labs(y = "Predicted y's", x = "Observed y's")
+ 
+ppd_intervals(t(t(y1_pred[ ,treat_ind])-y[treat_ind]),x=y[treat_ind]) + geom_abline(intercept = 0, slope = 0)  +
+   ggplot2::labs(y = "Errors in predicted y's", x = "Observed y's")
+```
+
+```{r}
+# control group: fit model
+read_outcome_control <- list(N = nrow(X_control),
+                           N_test = nrow(X),
+                           K = ncol(X_control),
+                           pr_sd = 3,
+                           x = X_control,
+                           y = y_control,
+                           x_test = X)
+read_outcome_control_BLR <- sampling(outcome_normal, data=read_outcome_control, iter=5000, warmup=4000, chains=1)
+```
+
+```{r}
+# control group: check mixing
+class(read_outcome_control_BLR)
+post_smp <- as.data.frame(read_outcome_control_BLR)
+colnames(post_smp)[1:5] <- colnames(X)
+ 
+mcmc_areas(post_smp[,1:5], pars = colnames(X)[1:5], prob = 0.8)
+ 
+plot(post_smp$gender, type='l')
+plot(post_smp$family_class, type='l')
+plot(post_smp$tech_access, type='l')
+```
+
+```{r}
+# control group: predictive check
+y0_pred <- extract(read_outcome_control_BLR)$y_rep
+ 
+ppd_intervals(y0_pred[ ,control_ind], x=y[control_ind]) + geom_abline(intercept = 0, slope = 1)  +
+   ggplot2::labs(y = "Predicted y's", x = "Observed y's")
+ 
+ppd_intervals(t(t(y0_pred[ ,control_ind])-y[control_ind]),x=y[control_ind]) + geom_abline(intercept = 0, slope = 0)  +
+   ggplot2::labs(y = "Errors in predicted y's", x = "Observed y's")
+```
+
+
+### BART
+```{r}
+# treatment group: fit model
+read_outcome_treat_BART <- wbart(x.train=as.matrix(X_treat[1:5]), 
                             y.train = y_treat, 
                             x.test=as.matrix(X[1:5]),
                             w=data_AUS$stu_wgt)
@@ -318,8 +449,8 @@ read_outcome_treat <- wbart(x.train=as.matrix(X_treat[1:5]),
 
 
 ```{r}
-# predictive check
-y1_pred <- read_outcome_treat$yhat.test
+# treatment group: predictive check
+y1_pred <- read_outcome_treat_BART$yhat.test
 
 ppd_intervals(y1_pred[ ,treat_ind],x=y[treat_ind]) + geom_abline(intercept = 0, slope = 1)  +
   ggplot2::labs(y = "Predicted y's", x = "Observed y's", title="Read: Predictive check for treatment group")
@@ -330,7 +461,8 @@ ppd_intervals(t(t(y1_pred[ ,treat_ind])-y[treat_ind]),x=y[treat_ind]) + geom_abl
 
 
 ```{r}
-read_outcome_control <- wbart(x.train=as.matrix(X_control[1:5]), 
+# control group: fit model
+read_outcome_control_BART <- wbart(x.train=as.matrix(X_control[1:5]), 
                               y.train = y_control, 
                               x.test=as.matrix(X[1:5]), 
                               w=data_AUS$stu_wgt)
@@ -338,8 +470,8 @@ read_outcome_control <- wbart(x.train=as.matrix(X_control[1:5]),
 
 
 ```{r}
-# predictive check
-y0_pred <- read_outcome_control$yhat.test
+# control group: predictive check
+y0_pred <- read_outcome_control_BART$yhat.test
 
 ppd_intervals(y0_pred[ ,control_ind],x=y[control_ind]) + geom_abline(intercept = 0, slope = 1)  +
   ggplot2::labs(y = "Predicted y's", x = "Observed y's", title="Read: Predictive check for control group")
@@ -356,9 +488,86 @@ y_treat <- y[treat_ind]
 y_control <- y[control_ind]
 ```
 
+### bayesian linear regression
+```{r}
+# treatment group: fit model
+sci_outcome_treat <- list(N = nrow(X_treat),
+                           N_test = nrow(X),
+                           K = ncol(X_treat),
+                           pr_sd = 3,
+                           x = X_treat,
+                           y = y_treat,
+                           x_test = X)
+sci_outcome_treat_BLR <- sampling(outcome_normal, data=sci_outcome_treat, iter=5000, warmup=4000, chains=1)
+```
+
 
 ```{r}
-science_outcome_treat <- wbart(x.train=as.matrix(X_treat[1:5]), 
+# treatment group: check mixing
+class(sci_outcome_treat_BLR)
+post_smp <- as.data.frame(sci_outcome_treat_BLR)
+colnames(post_smp)[1:5] <- colnames(X)
+ 
+mcmc_areas(post_smp[,1:5], pars = colnames(X)[1:5], prob = 0.8)
+ 
+plot(post_smp$gender, type='l')
+plot(post_smp$family_class, type='l')
+plot(post_smp$tech_access, type='l')
+```
+
+
+```{r}
+# treatment group: predictive check
+y1_pred <- extract(sci_outcome_treat_BLR)$y_rep
+ 
+ppd_intervals(y1_pred[ ,treat_ind], x=y[treat_ind]) + geom_abline(intercept = 0, slope = 1)  +
+   ggplot2::labs(y = "Predicted y's", x = "Observed y's")
+ 
+ppd_intervals(t(t(y1_pred[ ,treat_ind])-y[treat_ind]),x=y[treat_ind]) + geom_abline(intercept = 0, slope = 0)  +
+   ggplot2::labs(y = "Errors in predicted y's", x = "Observed y's")
+```
+
+```{r}
+# control group: fit model
+sci_outcome_control <- list(N = nrow(X_control),
+                           N_test = nrow(X),
+                           K = ncol(X_control),
+                           pr_sd = 3,
+                           x = X_control,
+                           y = y_control,
+                           x_test = X)
+sci_outcome_control_BLR <- sampling(outcome_normal, data=sci_outcome_control, iter=5000, warmup=4000, chains=1)
+```
+
+```{r}
+# control group: check mixing
+class(sci_outcome_control_BLR)
+post_smp <- as.data.frame(sci_outcome_control_BLR)
+colnames(post_smp)[1:5] <- colnames(X)
+ 
+mcmc_areas(post_smp[,1:5], pars = colnames(X)[1:5], prob = 0.8)
+ 
+plot(post_smp$gender, type='l')
+plot(post_smp$family_class, type='l')
+plot(post_smp$tech_access, type='l')
+```
+
+```{r}
+# control group: predictive check
+y0_pred <- extract(sci_outcome_control_BLR)$y_rep
+ 
+ppd_intervals(y0_pred[ ,control_ind], x=y[control_ind]) + geom_abline(intercept = 0, slope = 1)  +
+   ggplot2::labs(y = "Predicted y's", x = "Observed y's")
+ 
+ppd_intervals(t(t(y0_pred[ ,control_ind])-y[control_ind]),x=y[control_ind]) + geom_abline(intercept = 0, slope = 0)  +
+   ggplot2::labs(y = "Errors in predicted y's", x = "Observed y's")
+```
+
+
+### BART
+```{r}
+# treatment group: fit the model
+sci_outcome_treat_BART <- wbart(x.train=as.matrix(X_treat[1:5]), 
                                y.train = y_treat,
                                x.test=as.matrix(X[1:5]),
                                w=data_AUS$stu_wgt)
@@ -366,8 +575,8 @@ science_outcome_treat <- wbart(x.train=as.matrix(X_treat[1:5]),
 
 
 ```{r}
-# predictive check
-y1_pred <- science_outcome_treat$yhat.test
+# treatment group: predictive check
+y1_pred <- sci_outcome_treat_BART$yhat.test
 
 ppd_intervals(y1_pred[ ,treat_ind],x=y[treat_ind]) + geom_abline(intercept = 0, slope = 1)  +
   ggplot2::labs(y = "Predicted y's", x = "Observed y's", title="Read: Predictive check for treatment group")
@@ -378,7 +587,8 @@ ppd_intervals(t(t(y1_pred[ ,treat_ind])-y[treat_ind]),x=y[treat_ind]) + geom_abl
 
 
 ```{r}
-science_outcome_control <- wbart(x.train=as.matrix(X_control[1:5]), 
+# control group: fit the model
+sci_outcome_control_BART <- wbart(x.train=as.matrix(X_control[1:5]), 
                                  y.train = y_control, 
                                  x.test=as.matrix(X[1:5]), 
                                  w=data_AUS$stu_wgt)
@@ -386,8 +596,8 @@ science_outcome_control <- wbart(x.train=as.matrix(X_control[1:5]),
 
 
 ```{r}
-# predictive check
-y0_pred <- science_outcome_control$yhat.test
+# control group: predictive check
+y0_pred <- sci_outcome_control_BART$yhat.test
 
 ppd_intervals(y0_pred[ ,control_ind],x=y[control_ind]) + geom_abline(intercept = 0, slope = 1)  +
   ggplot2::labs(y = "Predicted y's", x = "Observed y's", title="Read: Predictive check for control group")
@@ -397,15 +607,9 @@ ppd_intervals(t(t(y0_pred[ ,control_ind])-y[control_ind]), x=y[control_ind]) + g
 ```
 
 
-# calculate CATE
-## math
+# calculate CATE - doubly-robust estimator
+
 ```{r}
-y <- data$math
-y0_pred <- exp(math_outcome_control$yhat.test)
-y1_pred <- exp(math_outcome_treat$yhat.test)
-
-causal_contrasts <- dr_estimate(y, t, y0_pred, y1_pred, ps)
-
 group1_ind <- (X$gender == 1) & (X$family_class == 1) & (X$tech_access ==1)
 group2_ind <- (X$gender == 0) & (X$family_class == 1) & (X$tech_access ==1)
 group3_ind <- (X$gender == 1) & (X$family_class == 0) & (X$tech_access ==1)
@@ -414,29 +618,75 @@ group5_ind <- (X$gender == 1) & (X$family_class == 1) & (X$tech_access ==0)
 group6_ind <- (X$gender == 0) & (X$family_class == 1) & (X$tech_access ==0)
 group7_ind <- (X$gender == 1) & (X$family_class == 0) & (X$tech_access ==0)
 group8_ind <- (X$gender == 0) & (X$family_class == 0) & (X$tech_access ==0)
+```
 
-cate1 <- rowMeans(causal_contrasts[, group1_ind])
-cate2 <- rowMeans(causal_contrasts[, group2_ind])
-cate3 <- rowMeans(causal_contrasts[, group3_ind])
-cate4 <- rowMeans(causal_contrasts[, group4_ind])
-cate5 <- rowMeans(causal_contrasts[, group5_ind])
-cate6 <- rowMeans(causal_contrasts[, group6_ind])
-cate7 <- rowMeans(causal_contrasts[, group7_ind])
-cate8 <- rowMeans(causal_contrasts[, group8_ind])
+
+## math
+```{r}
+y <- data$math
+```
+
+### bayesian linear regression
+```{r}
+y0_pred <- exp(extract(math_outcome_control_BLR)$y_rep)
+y1_pred <- exp(extract(math_outcome_treat_BLR)$y_rep)
+
+causal_contrasts <- dr_estimate(y, t, y0_pred, y1_pred, ps)
+
+cate1_dr <- rowMeans(causal_contrasts[, group1_ind])
+cate2_dr <- rowMeans(causal_contrasts[, group2_ind])
+cate3_dr <- rowMeans(causal_contrasts[, group3_ind])
+cate4_dr <- rowMeans(causal_contrasts[, group4_ind])
+cate5_dr <- rowMeans(causal_contrasts[, group5_ind])
+cate6_dr <- rowMeans(causal_contrasts[, group6_ind])
+cate7_dr <- rowMeans(causal_contrasts[, group7_ind])
+cate8_dr <- rowMeans(causal_contrasts[, group8_ind])
 ```
 
 ```{r}
-cate_math <- data.frame(cate1, cate2, cate3, cate4, cate5, cate6, cate7, cate8)
-colnames(cate_math) <-  c("female, middle, tech", 
-                     "male, middle, tech", 
-                     "female, working, tech", 
-                     "male, working, tech", 
-                     "female, middle, no_tech", 
-                     "male, middle, no_tech", 
-                     "female, working, no_tech", 
-                     "male, working, no_tech")
+cate_math_dr_BLR <- data.frame(cate1_dr, cate2_dr, cate3_dr, cate4_dr, cate5_dr, cate6_dr, cate7_dr, cate8_dr)
+colnames(cate_math_dr_BLR) <-  c("female, middle, tech", 
+                          "male, middle, tech", 
+                          "female, working, tech", 
+                          "male, working, tech", 
+                          "female, middle, no_tech", 
+                          "male, middle, no_tech", 
+                          "female, working, no_tech", 
+                          "male, working, no_tech")
 par(mar = c(4, 11, 4, 2))
-boxplot(cate_math, horizontal=TRUE, las=1, main="Math: Conditional Average Treatment Effect")
+boxplot(cate_math_dr_BLR, horizontal=TRUE, las=1, main="Math: CATE (with BLR)")
+```
+
+
+### BART
+```{r}
+y0_pred <- exp(math_outcome_control_BART$yhat.test)
+y1_pred <- exp(math_outcome_treat_BART$yhat.test)
+
+causal_contrasts <- dr_estimate(y, t, y0_pred, y1_pred, ps)
+
+cate1_dr <- rowMeans(causal_contrasts[, group1_ind])
+cate2_dr <- rowMeans(causal_contrasts[, group2_ind])
+cate3_dr <- rowMeans(causal_contrasts[, group3_ind])
+cate4_dr <- rowMeans(causal_contrasts[, group4_ind])
+cate5_dr <- rowMeans(causal_contrasts[, group5_ind])
+cate6_dr <- rowMeans(causal_contrasts[, group6_ind])
+cate7_dr <- rowMeans(causal_contrasts[, group7_ind])
+cate8_dr <- rowMeans(causal_contrasts[, group8_ind])
+```
+
+```{r}
+cate_math_dr_BART <- data.frame(cate1_dr, cate2_dr, cate3_dr, cate4_dr, cate5_dr, cate6_dr, cate7_dr, cate8_dr)
+colnames(cate_math_dr_BART) <-  c("female, middle, tech", 
+                          "male, middle, tech", 
+                          "female, working, tech", 
+                          "male, working, tech", 
+                          "female, middle, no_tech", 
+                          "male, middle, no_tech", 
+                          "female, working, no_tech", 
+                          "male, working, no_tech")
+par(mar = c(4, 11, 4, 2))
+boxplot(cate_math_dr_BART, horizontal=TRUE, las=1, main="Math: CATE (with BART)")
 
 
 #boxplot(cate, las=2)
@@ -446,90 +696,142 @@ boxplot(cate_math, horizontal=TRUE, las=1, main="Math: Conditional Average Treat
 
 ```{r}
 y <- data$read
-y0_pred <- exp(read_outcome_control$yhat.test)
-y1_pred <- exp(read_outcome_treat$yhat.test)
+```
+
+### bayesian linear regression
+```{r}
+y0_pred <- exp(extract(read_outcome_control_BLR)$y_rep)
+y1_pred <- exp(extract(read_outcome_treat_BLR)$y_rep)
 
 causal_contrasts <- dr_estimate(y, t, y0_pred, y1_pred, ps)
 
-group1_ind <- (X$gender == 1) & (X$family_class == 1) & (X$tech_access ==1)
-group2_ind <- (X$gender == 0) & (X$family_class == 1) & (X$tech_access ==1)
-group3_ind <- (X$gender == 1) & (X$family_class == 0) & (X$tech_access ==1)
-group4_ind <- (X$gender == 0) & (X$family_class == 0) & (X$tech_access ==1)
-group5_ind <- (X$gender == 1) & (X$family_class == 1) & (X$tech_access ==0)
-group6_ind <- (X$gender == 0) & (X$family_class == 1) & (X$tech_access ==0)
-group7_ind <- (X$gender == 1) & (X$family_class == 0) & (X$tech_access ==0)
-group8_ind <- (X$gender == 0) & (X$family_class == 0) & (X$tech_access ==0)
+cate1_dr <- rowMeans(causal_contrasts[, group1_ind])
+cate2_dr <- rowMeans(causal_contrasts[, group2_ind])
+cate3_dr <- rowMeans(causal_contrasts[, group3_ind])
+cate4_dr <- rowMeans(causal_contrasts[, group4_ind])
+cate5_dr <- rowMeans(causal_contrasts[, group5_ind])
+cate6_dr <- rowMeans(causal_contrasts[, group6_ind])
+cate7_dr <- rowMeans(causal_contrasts[, group7_ind])
+cate8_dr <- rowMeans(causal_contrasts[, group8_ind])
+```
 
-cate1 <- rowMeans(causal_contrasts[, group1_ind])
-cate2 <- rowMeans(causal_contrasts[, group2_ind])
-cate3 <- rowMeans(causal_contrasts[, group3_ind])
-cate4 <- rowMeans(causal_contrasts[, group4_ind])
-cate5 <- rowMeans(causal_contrasts[, group5_ind])
-cate6 <- rowMeans(causal_contrasts[, group6_ind])
-cate7 <- rowMeans(causal_contrasts[, group7_ind])
-cate8 <- rowMeans(causal_contrasts[, group8_ind])
+```{r}
+cate_read_dr_BLR <- data.frame(cate1_dr, cate2_dr, cate3_dr, cate4_dr, cate5_dr, cate6_dr, cate7_dr, cate8_dr)
+colnames(cate_read_dr_BLR) <-  c("female, middle, tech", 
+                          "male, middle, tech", 
+                          "female, working, tech", 
+                          "male, working, tech", 
+                          "female, middle, no_tech", 
+                          "male, middle, no_tech", 
+                          "female, working, no_tech", 
+                          "male, working, no_tech")
+par(mar = c(4, 11, 4, 2))
+boxplot(cate_read_dr_BLR, horizontal=TRUE, las=1, main="Read: CATE (with BLR)")
+```
+
+### BART
+```{r}
+y0_pred <- exp(read_outcome_control_BART$yhat.test)
+y1_pred <- exp(read_outcome_treat_BART$yhat.test)
+
+causal_contrasts <- dr_estimate(y, t, y0_pred, y1_pred, ps)
+
+cate1_dr <- rowMeans(causal_contrasts[, group1_ind])
+cate2_dr <- rowMeans(causal_contrasts[, group2_ind])
+cate3_dr <- rowMeans(causal_contrasts[, group3_ind])
+cate4_dr <- rowMeans(causal_contrasts[, group4_ind])
+cate5_dr <- rowMeans(causal_contrasts[, group5_ind])
+cate6_dr <- rowMeans(causal_contrasts[, group6_ind])
+cate7_dr <- rowMeans(causal_contrasts[, group7_ind])
+cate8_dr <- rowMeans(causal_contrasts[, group8_ind])
 ```
 
 
 ```{r}
-cate_read <- data.frame(cate1, cate2, cate3, cate4, cate5, cate6, cate7, cate8)
-colnames(cate_read) <-  c("female, middle, tech", 
-                     "male, middle, tech", 
-                     "female, working, tech", 
-                     "male, working, tech", 
-                     "female, middle, no_tech", 
-                     "male, middle, no_tech", 
-                     "female, working, no_tech", 
-                     "male, working, no_tech")
+cate_read_dr_BART <- data.frame(cate1_dr, cate2_dr, cate3_dr, cate4_dr, cate5_dr, cate6_dr, cate7_dr, cate8_dr)
+colnames(cate_read_dr_BART) <- c("female, middle, tech", 
+                          "male, middle, tech", 
+                          "female, working, tech", 
+                          "male, working, tech", 
+                          "female, middle, no_tech", 
+                          "male, middle, no_tech", 
+                          "female, working, no_tech", 
+                          "male, working, no_tech")
 par(mar = c(4, 11, 4, 2))
-boxplot(cate_read, horizontal=TRUE, las=1, main="Read: Conditional Average Treatment Effect")
+boxplot(cate_read_dr_BART, horizontal=TRUE, las=1, main="Read: CATE (with BART)")
 
 
 #boxplot(cate, las=2)
 ```
 
 
-##science
+## science
 
 ```{r}
 y <- data$science
-y0_pred <- exp(science_outcome_control$yhat.test)
-y1_pred <- exp(science_outcome_treat$yhat.test)
+```
+
+### Bayesian Linear Regression
+```{r}
+y0_pred <- exp(extract(sci_outcome_control_BLR)$y_rep)
+y1_pred <- exp(extract(sci_outcome_treat_BLR)$y_rep)
 
 causal_contrasts <- dr_estimate(y, t, y0_pred, y1_pred, ps)
 
-group1_ind <- (X$gender == 1) & (X$family_class == 1) & (X$tech_access ==1)
-group2_ind <- (X$gender == 0) & (X$family_class == 1) & (X$tech_access ==1)
-group3_ind <- (X$gender == 1) & (X$family_class == 0) & (X$tech_access ==1)
-group4_ind <- (X$gender == 0) & (X$family_class == 0) & (X$tech_access ==1)
-group5_ind <- (X$gender == 1) & (X$family_class == 1) & (X$tech_access ==0)
-group6_ind <- (X$gender == 0) & (X$family_class == 1) & (X$tech_access ==0)
-group7_ind <- (X$gender == 1) & (X$family_class == 0) & (X$tech_access ==0)
-group8_ind <- (X$gender == 0) & (X$family_class == 0) & (X$tech_access ==0)
+cate1_dr <- rowMeans(causal_contrasts[, group1_ind])
+cate2_dr <- rowMeans(causal_contrasts[, group2_ind])
+cate3_dr <- rowMeans(causal_contrasts[, group3_ind])
+cate4_dr <- rowMeans(causal_contrasts[, group4_ind])
+cate5_dr <- rowMeans(causal_contrasts[, group5_ind])
+cate6_dr <- rowMeans(causal_contrasts[, group6_ind])
+cate7_dr <- rowMeans(causal_contrasts[, group7_ind])
+cate8_dr <- rowMeans(causal_contrasts[, group8_ind])
+```
 
-cate1 <- rowMeans(causal_contrasts[, group1_ind])
-cate2 <- rowMeans(causal_contrasts[, group2_ind])
-cate3 <- rowMeans(causal_contrasts[, group3_ind])
-cate4 <- rowMeans(causal_contrasts[, group4_ind])
-cate5 <- rowMeans(causal_contrasts[, group5_ind])
-cate6 <- rowMeans(causal_contrasts[, group6_ind])
-cate7 <- rowMeans(causal_contrasts[, group7_ind])
-cate8 <- rowMeans(causal_contrasts[, group8_ind])
+```{r}
+cate_sci_dr_BLR <- data.frame(cate1_dr, cate2_dr, cate3_dr, cate4_dr, cate5_dr, cate6_dr, cate7_dr, cate8_dr)
+colnames(cate_read_dr_BLR) <-  c("female, middle, tech", 
+                          "male, middle, tech", 
+                          "female, working, tech", 
+                          "male, working, tech", 
+                          "female, middle, no_tech", 
+                          "male, middle, no_tech", 
+                          "female, working, no_tech", 
+                          "male, working, no_tech")
+par(mar = c(4, 11, 4, 2))
+boxplot(cate_sci_dr_BLR, horizontal=TRUE, las=1, main="Science: CATE (with BLR)")
+```
+
+### BART
+```{r}
+y0_pred <- exp(sci_outcome_control_BART$yhat.test)
+y1_pred <- exp(sci_outcome_treat_BART$yhat.test)
+
+causal_contrasts <- dr_estimate(y, t, y0_pred, y1_pred, ps)
+
+cate1_dr <- rowMeans(causal_contrasts[, group1_ind])
+cate2_dr <- rowMeans(causal_contrasts[, group2_ind])
+cate3_dr <- rowMeans(causal_contrasts[, group3_ind])
+cate4_dr <- rowMeans(causal_contrasts[, group4_ind])
+cate5_dr <- rowMeans(causal_contrasts[, group5_ind])
+cate6_dr <- rowMeans(causal_contrasts[, group6_ind])
+cate7_dr <- rowMeans(causal_contrasts[, group7_ind])
+cate8_dr <- rowMeans(causal_contrasts[, group8_ind])
 ```
 
 
 ```{r}
-cate_science <- data.frame(cate1, cate2, cate3, cate4, cate5, cate6, cate7, cate8)
-colnames(cate_science) <-  c("female, middle, tech", 
-                     "male, middle, tech", 
-                     "female, working, tech", 
-                     "male, working, tech", 
-                     "female, middle, no_tech", 
-                     "male, middle, no_tech", 
-                     "female, working, no_tech", 
-                     "male, working, no_tech")
+cate_science_dr_BART <- data.frame(cate1_dr, cate2_dr, cate3_dr, cate4_dr, cate5_dr, cate6_dr, cate7_dr, cate8_dr)
+colnames(cate_science_dr_BART) <- c("female, middle, tech", 
+                               "male, middle, tech", 
+                               "female, working, tech", 
+                               "male, working, tech", 
+                               "female, middle, no_tech", 
+                               "male, middle, no_tech", 
+                               "female, working, no_tech", 
+                               "male, working, no_tech")
 par(mar = c(4, 11, 4, 2))
-boxplot(cate_science, horizontal=TRUE, las=1, main="Read: Conditional Average Treatment Effect")
+boxplot(cate_science_dr_BART, horizontal=TRUE, las=1, main="Science: CATE (with BART)")
 
 
 #boxplot(cate, las=2)
@@ -537,6 +839,15 @@ boxplot(cate_science, horizontal=TRUE, las=1, main="Read: Conditional Average Tr
 
 
 # some visualizations
+
+```{r}
+hist(X_treat$wealth, col = rgb(0, 0, 1, 0.5), xlim = c(-7, 7), ylim=c(0, 1600),
+     main = "wealth", xlab = "wealth", breaks = 30)
+hist(X_control$wealth, col = rgb(1, 0, 0, 0.5), add = TRUE, breaks = 30)
+
+legend("topright", legend = c("private", "public"), 
+       fill = c(rgb(0, 0, 1, 0.5), rgb(1, 0, 0, 0.5)))
+```
 
 ```{r}
 hist(X_treat$wealth, col = rgb(0, 0, 1, 0.5), xlim = c(-7, 7), ylim=c(0, 1600),
