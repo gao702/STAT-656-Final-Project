@@ -1,0 +1,251 @@
+---
+title: "Data Preprocess on PISA 2018 data"
+output: html_document
+---
+
+## empty the environment
+
+```{r}
+rm(list = ls())
+```
+
+Set the working directory the same as where this Rmd file is located.
+
+## read the raw data
+
+```{r}
+full_student_data_2018<-readRDS(file = "./data/raw/full_student_data_2018.Rds")
+countrycode<-readRDS(file = "./data/raw/countrycode.Rds")
+school_2018<-readRDS(file = "./data/raw/school_2018.Rds")
+```
+
+## select data from Austrilia(AUS), Canada(CAN),United Kingdom(GBR)
+
+Due to the computation time consuming, we are not able to do analysis to the whole PISA 2018 data. Therefore, we select three countries(AUS/CAN/GBR). all of them are developed countries from different continent while sharing similar culture background.
+
+ChatGPT suggest justifying the selection based on the following points:
+
+1. Shared Cultural and Educational Contexts:
+Australia, the United Kingdom, and Canada share similarities in language (predominantly English-speaking) and educational philosophies, providing a more coherent basis for comparative analysis.
+
+2. Economic Comparability:
+These countries are high-income economies with well-established educational systems, making them suitable for examining variations within a comparable socioeconomic context.
+
+Geographical Diversity within Similar Systems:
+Although these countries share similarities, their geographical dispersion allows exploration of how localized factors (e.g., regional policies or demographics) influence educational outcomes.
+
+3. Participation and Data Completeness:
+These countries often have high participation rates and comprehensive data coverage in PISA assessments, ensuring robust and reliable datasets for analysis.
+
+4. Relevance to Policy Implications:
+By focusing on these countries, the analysis can provide insights that are relevant to English-speaking educational systems, which may guide specific policy recommendations or initiatives.
+
+This subset allows you to strike a balance between manageable scope and meaningful cross-country comparisons.
+
+```{r}
+# Load necessary libraries
+library(tidyverse)
+
+# Filter data for Australia, United Kingdom, and Canada
+selected_countries <- c("AUS", "GBR", "CAN")
+
+# Preprocess the data
+selected_countries_student_data_2018 <- full_student_data_2018 %>%
+  # Filter for selected countries
+  filter(country %in% selected_countries) %>%
+  # Select relevant columns
+  select(
+    country,
+    school_id,
+    student_id,
+    gender,
+    mother_educ,
+    father_educ,
+    computer,
+    internet,
+    math,
+    read,
+    science,
+    stu_wgt
+  )
+```
+
+```{r}
+head(selected_countries_student_data_2018)
+```
+
+
+```{r}
+selected_countries_school_2018 <- school_2018 %>%
+  # Filter for selected countries
+  filter(country %in% selected_countries) %>%
+  # Select relevant columns
+  select(
+    country,
+    school_id,
+    public_private
+  )
+```
+
+```{r}
+head(selected_countries_school_2018)
+```
+
+## Join public_private column in school dataset to student dataset
+
+```{r}
+# Perform a left join to add public_private to the student data
+joined_data <- selected_countries_student_data_2018 %>%
+  left_join(
+    selected_countries_school_2018,
+    by = c("country", "school_id")
+  )
+
+# Check the first few rows of the joined dataset
+head(joined_data)
+```
+
+## Generate family_class column through mother_educ and father_educ
+
+```{r}
+updated_data <- joined_data %>%
+  mutate(
+    family_class = if_else(
+      mother_educ == "ISCED 3A" | father_educ == "ISCED 3A",
+      "middle class",
+      "working class"
+    )
+  )%>%
+  select(-mother_educ, -father_educ)
+```
+
+```{r}
+head(updated_data)
+```
+
+## NA removal and justification
+
+Generate a summary of missing values before removal.
+
+```{r}
+library(naniar)
+
+# Visualize missing data
+gg_miss_var(updated_data) +
+  labs(title = "Missing Data by Variable", x = "Variables", y = "Number of Missing Values")
+
+# Count missing data rows
+total_rows <- nrow(updated_data)
+rows_with_na <- nrow(updated_data %>% filter(!complete.cases(.)))
+proportion_removed <- rows_with_na / total_rows
+cat("Total rows:", total_rows, "\nRows with NA:", rows_with_na, 
+    "\nProportion removed:", round(proportion_removed * 100, 2), "%\n")
+```
+
+Filter out rows with NA values.
+
+```{r}
+# Remove rows with NA
+cleaned_data <- updated_data %>%
+  drop_na()
+
+# Summary of remaining rows
+remaining_rows <- nrow(cleaned_data)
+cat("Remaining rows after removing NA:", remaining_rows, "\n")
+
+```
+Create a bar plot to compare the number of rows before and after removing NA.
+
+```{r}
+library(ggplot2)
+
+# Data for visualization
+removal_summary <- tibble(
+  Status = c("Original", "Removed", "Cleaned"),
+  Count = c(total_rows, rows_with_na, remaining_rows)
+)
+
+# Plot
+ggplot(removal_summary, aes(x = Status, y = Count, fill = Status)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Impact of Removing Missing Data",
+    x = "Dataset Status",
+    y = "Number of Rows"
+  ) +
+  scale_fill_manual(values = c("Original" = "blue", "Removed" = "red", "Cleaned" = "green")) +
+  theme_minimal()
+
+```
+Justification for Removing NA Values:
+1.Ensuring Data Integrity: Rows with missing values often lack critical information. Retaining them could bias the analysis or lead to invalid conclusions.
+2.Minimal Impact: Based on the proportion of removed data, the impact of this step on the dataset size is likely minimal. This is demonstrated by the summary statistics and visualization.
+3.Unbiased Models: Statistical models often require complete cases. Removing rows with missing values ensures unbiased parameter estimation.
+
+## Analyze Characteristics of Removed Data
+
+Investigate whether the rows with missing values have specific patterns or differ from the retained data.
+
+```{r}
+# Separate removed and retained data
+removed_data <- updated_data %>% filter(!complete.cases(.))
+retained_data <- updated_data %>% filter(complete.cases(.))
+
+# Compare distributions of key variables
+compare_summary <- bind_rows(
+  removed_data %>% mutate(status = "Removed"),
+  retained_data %>% mutate(status = "Retained")
+) %>%
+  group_by(status) %>%
+  summarize(
+    avg_math = mean(math, na.rm = TRUE),
+    avg_read = mean(read, na.rm = TRUE),
+    avg_science = mean(science, na.rm = TRUE),
+    total = n()
+  )
+
+print(compare_summary)
+
+```
+
+Removed: 8,295 rows with missing data.
+Retained: 42,449 rows with complete data.
+Interpretation: Around 16.35% of the total data was removed, which is substantial but not overly significant if the remaining data is representative.
+
+1. Interperation:
+Students with missing data tend to have lower scores across all subjects. This may indicate that missingness is not random (e.g., related to socioeconomic status or school type), which could introduce bias if not properly addressed.
+
+2. Weaknesses:
+
+Potential Bias:
+If the missing data is associated with lower-performing students, removing these rows may overestimate overall averages and lead to biased conclusions.
+This highlights a potential "data not missing at random" (NMAR) issue.
+
+Consideration of Missingness:
+Missingness may relate to systematic factors such as resource availability, school type, or socioeconomic factors.
+Justify removal by emphasizing that imputing values could introduce noise or bias, depending on the imputation method.
+
+Model Building:
+Acknowledge that the cleaned dataset may skew towards higher-performing students.
+Use this insight to inform model selection or consider methods that adjust for missingness.
+
+3. Justification:
+
+Argue that removing rows with missing data ensures analytical consistency, as models often require complete cases.
+Emphasize that while the removed data differs slightly, the retained data is still sufficiently large for robust analysis.
+
+4. Next Steps:
+
+If possible, explore imputation methods to handle missing values (e.g., mean imputation, multiple imputation, or regression-based methods).
+Alternatively, include an analysis of missingness patterns as part of your report to address potential bias transparently.
+
+```{r}
+head(cleaned_data)
+```
+
+```{r}
+saveRDS(cleaned_data,file = "./data/cleaned/cleaned_data.Rds")
+```
+
+
+

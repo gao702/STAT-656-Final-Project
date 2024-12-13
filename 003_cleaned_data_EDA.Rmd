@@ -1,0 +1,189 @@
+---
+title: "cleaned_data_EDA"
+output: html_document
+---
+
+## Input the cleaned data
+
+```{r}
+rm(list = ls())
+data <- readRDS(file = "./data/cleaned/cleaned_data.Rds")
+library(tidyverse)
+```
+
+```{r}
+head(data)
+```
+
+## Summarize the Data
+
+Generate descriptive statistics for the numerical variables.
+
+```{r}
+# Summary statistics
+summary(data)
+
+data %>%
+  group_by(country) %>%
+  summarize(
+    avg_math = mean(math, na.rm = TRUE),
+    avg_read = mean(read, na.rm = TRUE),
+    avg_science = mean(science, na.rm = TRUE),
+    students = n()
+  )
+
+```
+
+```{r}
+library(skimr)
+skim(data)
+```
+
+## Visualize Distributions
+
+### Numerical Variables
+Visualize score distributions for math, read, and science.
+```{r}
+# Histogram of scores
+hist_scores <- data %>%
+  pivot_longer(cols = c(math, read, science), names_to = "subject", values_to = "score") %>%
+  ggplot(aes(x = score, fill = subject)) +
+  geom_histogram(binwidth = 20, alpha = 0.6, position = "identity") +
+  facet_wrap(~subject) +
+  labs(
+    title = "Distribution of Scores by Subject",
+    x = "Score",
+    y = "Frequency"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("math" = "blue", "read" = "orange", "science" = "green"))
+hist_scores
+```
+
+```{r}
+ggsave(
+  filename = "./plots/distributions_of_scores_by_subjects.png",  # File name
+  plot = hist_scores,                              # Plot object
+  width = 12,                                        # Width in inches
+  height = 6,                                        # Height in inches
+  dpi = 300                                          # Resolution in dots per inch
+)
+```
+
+## categorical variables
+
+```{r}
+data %>%
+  pivot_longer(cols = c(math, read, science), names_to = "subject", values_to = "score") %>%
+  ggplot(aes(x = country, y = score, fill = country)) +
+  geom_boxplot() +
+  facet_wrap(~subject) +
+  labs(
+    title = "Scores by Family Class",
+    x = "Family Class",
+    y = "Score"
+  ) +
+  theme_minimal()
+
+```
+
+
+```{r}
+plot_family_class <- data %>%
+  pivot_longer(cols = c(math, read, science), names_to = "subject", values_to = "score") %>%
+  ggplot(aes(x = family_class, y = score, fill = family_class)) +
+  geom_boxplot() +
+  facet_wrap(~subject) +
+  labs(
+    title = "Scores by Family Class",
+    x = "Family Class",
+    y = "Score"
+  ) +
+  theme_minimal()
+plot_family_class
+```
+
+```{r}
+plot_school_type <- data %>%
+  pivot_longer(cols = c(math, read, science), names_to = "subject", values_to = "score") %>%
+  ggplot(aes(x = public_private, y = score, fill = public_private)) +
+  geom_boxplot() +
+  facet_wrap(~subject) +
+  labs(
+    title = "Scores by Public vs Private Schools",
+    x = "School Type",
+    y = "Score"
+  ) +
+  theme_minimal()
+plot_school_type
+```
+
+```{r}
+plot_computer <- data %>%
+  pivot_longer(cols = c(math, read, science), names_to = "subject", values_to = "score") %>%
+  ggplot(aes(x = computer, y = score, fill = computer)) +
+  geom_boxplot() +
+  facet_wrap(~subject) +
+  labs(
+    title = "Scores by Computer Access",
+    x = "Computer Access",
+    y = "Score"
+  ) +
+  theme_minimal()
+plot_computer
+```
+
+```{r}
+plot_internet<-data %>%
+  pivot_longer(cols = c(math, read, science), names_to = "subject", values_to = "score") %>%
+  ggplot(aes(x = internet, y = score, fill = internet)) +
+  geom_boxplot() +
+  facet_wrap(~subject) +
+  labs(
+    title = "Scores by Internet Access",
+    x = "Internet Acces",
+    y = "Score"
+  ) +
+  theme_minimal()
+plot_internet
+```
+
+```{r}
+plot_gender<- data %>%
+  pivot_longer(cols = c(math, read, science), names_to = "subject", values_to = "score") %>%
+  ggplot(aes(x = gender, y = score, fill = gender)) +
+  geom_boxplot() +
+  facet_wrap(~subject) +
+  labs(
+    title = "Scores by Gender",
+    x = "Gender",
+    y = "Score"
+  ) +
+  theme_minimal()
+plot_gender
+```
+
+```{r}
+library(ggplot2)
+library(patchwork)
+```
+
+```{r}
+blank_plot <- ggplot() + theme_void() 
+combined_EDA_plot <-  ((plot_gender | plot_family_class | plot_school_type)/(plot_computer | plot_internet | blank_plot)) +
+  plot_annotation(
+    title = "Boxplots of categorical variables",
+    theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+  )
+combined_EDA_plot
+```
+
+```{r}
+ggsave(
+  filename = "./plots/combined_EDA_plot.png",  # File name
+  plot = combined_EDA_plot,                              # Plot object
+  width = 12,                                        # Width in inches
+  height = 6,                                        # Height in inches
+  dpi = 300                                          # Resolution in dots per inch
+)
+```

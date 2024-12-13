@@ -1,0 +1,482 @@
+---
+title: "fit_result_plot"
+output: html_document
+---
+
+```{r}
+rm(list = ls())
+math_fit = readRDS("./result/math_fit.Rds")
+data_math=readRDS(file = "./data/cleaned/cleaned_data_math.Rds")
+read_fit = readRDS("./result/read_fit.Rds")
+data_read=readRDS(file = "./data/cleaned/cleaned_data_read.Rds")
+science_fit = readRDS("./result/science_fit.Rds")
+data_science=readRDS(file = "./data/cleaned/cleaned_data_science.Rds")
+```
+
+
+
+```{r}
+# Print the results
+post_smp_math <- as.data.frame(math_fit)
+post_smp_read <- as.data.frame(read_fit)
+post_smp_science <- as.data.frame(science_fit)
+```
+
+
+```{r}
+library(bayesplot)
+library(ggplot2)
+library(coda)
+library(patchwork)
+library(tidyverse)
+```
+
+## paramethers across subjects
+
+```{r}
+preditor_math <- post_smp_math[,1:5]
+colnames(preditor_math)<-c("offset","gender","family class","computer","internet")
+preditor_read <- post_smp_read[,1:5]
+colnames(preditor_read)<-c("offset","gender","family class","computer","internet")
+preditor_science <- post_smp_science[,1:5]
+colnames(preditor_science)<-c("offset","gender","family class","computer","internet")
+
+preditor_math_plot <- mcmc_areas(preditor_math, prob = 0.95)+ ggtitle("Math")
+preditor_read_plot <- mcmc_areas(preditor_read, prob = 0.95)+ ggtitle("read")
+preditor_science_plot <- mcmc_areas(preditor_science, prob = 0.95)+ ggtitle("science")
+combined_preditor_plot <-  (preditor_math_plot | preditor_read_plot | preditor_science_plot) +
+  plot_annotation(
+    title = "Posterior Distributions of Parameters Across Subjects",
+    theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+  )
+combined_preditor_plot
+```
+
+```{r}
+ggsave(
+  filename = "./plots/posterior_distributions_subjects.png",  # File name
+  plot = combined_preditor_plot,                              # Plot object
+  width = 12,                                        # Width in inches
+  height = 6,                                        # Height in inches
+  dpi = 300                                          # Resolution in dots per inch
+)
+```
+
+```{r}
+# Create individual mcmc_trace plots
+trace_math <- mcmc_trace(preditor_math) + ggtitle("Math")
+trace_read <- mcmc_trace(preditor_read) + ggtitle("Read")
+trace_science <- mcmc_trace(preditor_science) + ggtitle("Science")
+
+# Combine trace plots into a single figure with three columns
+combined_trace_plot <- (trace_math / trace_read / trace_science) +
+  plot_annotation(
+    title = "MCMC Trace Plots for Parameters Across Subjects",
+    theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+  )
+
+# Display the combined trace plot
+combined_trace_plot
+
+```
+```{r}
+ggsave(
+  filename = "./plots/mcmc_trace_subjects_by_row.png",
+  plot = combined_trace_plot,
+  width = 8,
+  height = 12,
+  dpi = 300
+)
+```
+
+## parameter for countries
+
+```{r}
+# Prepare the data
+plot_country_math <- post_smp_math[, 306:308]
+colnames(plot_country_math) <- levels(data_math$country) # Assign country names as column names
+
+# Convert data to long format
+plot_country_math_long <- as.data.frame(plot_country_math) %>%
+  pivot_longer(cols = everything(), names_to = "Country", values_to = "Value")
+
+# Plot overlaid densities
+country_den_math<-ggplot(plot_country_math_long, aes(x = Value, fill = Country, color = Country)) +
+  geom_density(alpha = 0.5, linewidth = 0.8) +  # Alpha for transparency, size for line width
+  labs(
+    title = "Math",
+    x = "Effect Size",
+    y = "Density",
+    fill = "Country",
+    color = "Country"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+
+# Prepare the data
+plot_country_read <- post_smp_read[, 306:308]
+colnames(plot_country_read) <- levels(data_read$country) # Assign country names as column names
+
+# Convert data to long format
+plot_country_read_long <- as.data.frame(plot_country_read) %>%
+  pivot_longer(cols = everything(), names_to = "Country", values_to = "Value")
+
+# Plot overlaid densities
+country_den_read<-ggplot(plot_country_read_long, aes(x = Value, fill = Country, color = Country)) +
+  geom_density(alpha = 0.5, linewidth = 0.8) +  # Alpha for transparency, size for line width
+  labs(
+    title = "Read",
+    x = "Effect Size",
+    y = "Density",
+    fill = "Country",
+    color = "Country"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+
+# Prepare the data
+plot_country_science <- post_smp_science[, 306:308]
+colnames(plot_country_science) <- levels(data_science$country) # Assign country names as column names
+
+# Convert data to long format
+plot_country_science_long <- as.data.frame(plot_country_science) %>%
+  pivot_longer(cols = everything(), names_to = "Country", values_to = "Value")
+
+# Plot overlaid densities
+country_den_science<-ggplot(plot_country_science_long, aes(x = Value, fill = Country, color = Country)) +
+  geom_density(alpha = 0.5, linewidth = 0.8) +  # Alpha for transparency, size for line width
+  labs(
+    title = "Science",
+    x = "Effect Size",
+    y = "Density",
+    fill = "Country",
+    color = "Country"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+
+combined_country_den_plot <- (country_den_math / country_den_read / country_den_science) +
+  plot_annotation(
+    title = "Posterior Densities for Country Effects",
+    theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+  )
+
+combined_country_den_plot
+```
+
+```{r}
+ggsave(
+  filename = "./plots/combined_country_den_plot.png",
+  plot = combined_county_den_plot,
+  width = 6,
+  height = 8,
+  dpi = 300
+)
+```
+
+
+```{r}
+# Create individual mcmc_trace plots
+trace_math <- mcmc_trace(plot_country_math) + ggtitle("Math")
+trace_read <- mcmc_trace(plot_country_read) + ggtitle("Read")
+trace_science <- mcmc_trace(plot_country_science) + ggtitle("Science")
+
+# Combine trace plots into a single figure with three columns
+combined_trace_plot <- (trace_math / trace_read / trace_science) +
+  plot_annotation(
+    title = "MCMC Trace Plots for Parameters Across Countries",
+    theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+  )
+
+# Display the combined trace plot
+combined_trace_plot
+```
+
+```{r}
+ggsave(
+  filename = "./plots/mcmc_trace_countries_by_row.png",
+  plot = combined_trace_plot,
+  width = 8,
+  height = 8,
+  dpi = 300
+)
+```
+
+## school effect
+
+```{r}
+# Prepare the data
+plot_school_math <- post_smp_math[, 6:10]
+colnames(plot_school_math) <- paste0("school ",1:5) # Assign school names as column names
+
+# Convert data to long format
+plot_school_math_long <- as.data.frame(plot_school_math) %>%
+  pivot_longer(cols = everything(), names_to = "school", values_to = "Value")
+
+# Plot overlaid densities
+school_den_math<-ggplot(plot_school_math_long, aes(x = Value, fill = school, color = school)) +
+  geom_density(alpha = 0.5, linewidth = 0.8) +  # Alpha for transparency, size for line width
+  labs(
+    title = "Math",
+    x = "Effect Size",
+    y = "Density",
+    fill = "school",
+    color = "school"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+
+# Prepare the data
+plot_school_read <- post_smp_read[, 6:10]
+colnames(plot_school_read) <- paste0("school ",1:5) # Assign school names as column names
+
+# Convert data to long format
+plot_school_read_long <- as.data.frame(plot_school_read) %>%
+  pivot_longer(cols = everything(), names_to = "school", values_to = "Value")
+
+# Plot overlaid densities
+school_den_read<-ggplot(plot_school_read_long, aes(x = Value, fill = school, color = school)) +
+  geom_density(alpha = 0.5, linewidth = 0.8) +  # Alpha for transparency, size for line width
+  labs(
+    title = "Read",
+    x = "Effect Size",
+    y = "Density",
+    fill = "school",
+    color = "school"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+
+# Prepare the data
+plot_school_science <- post_smp_science[, 6:10]
+colnames(plot_school_science) <- paste0("school ",1:5) # Assign school names as column names
+
+# Convert data to long format
+plot_school_science_long <- as.data.frame(plot_school_science) %>%
+  pivot_longer(cols = everything(), names_to = "school", values_to = "Value")
+
+# Plot overlaid densities
+school_den_science<-ggplot(plot_school_science_long, aes(x = Value, fill = school, color = school)) +
+  geom_density(alpha = 0.5, linewidth = 0.8) +  # Alpha for transparency, size for line width
+  labs(
+    title = "Science",
+    x = "Effect Size",
+    y = "Density",
+    fill = "school",
+    color = "school"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+
+combined_school_den_plot <- (school_den_math / school_den_read / school_den_science) +
+  plot_annotation(
+    title = "Posterior Densities for school Effects",
+    theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+  )
+
+combined_school_den_plot
+```
+```{r}
+ggsave(
+  filename = "./plots/combined_school_den_plot.png",
+  plot = combined_school_den_plot,
+  width = 6,
+  height = 8,
+  dpi = 300
+)
+```
+
+```{r}
+# Create individual mcmc_trace plots
+trace_math <- mcmc_trace(plot_school_math) + ggtitle("Math")
+trace_read <- mcmc_trace(plot_school_read) + ggtitle("Read")
+trace_science <- mcmc_trace(plot_school_science) + ggtitle("Science")
+
+# Combine trace plots into a single figure with three columns
+combined_trace_plot <- (trace_math / trace_read / trace_science) +
+  plot_annotation(
+    title = "MCMC Trace Plots for Parameters Across Schools",
+    theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+  )
+
+# Display the combined trace plot
+combined_trace_plot
+```
+```{r}
+ggsave(
+  filename = "./plots/mcmc_trace_Schools_by_row.png",
+  plot = combined_trace_plot,
+  width = 8,
+  height = 12,
+  dpi = 300
+)
+```
+
+## variance check
+
+```{r}
+variance1_math <- post_smp_math[,309:310]
+colnames(variance1_math)<-c("sigma","tau")
+variance1_read <- post_smp_read[,309:310]
+colnames(variance1_read)<-c("sigma","tau")
+variance1_science <- post_smp_science[,309:310]
+colnames(variance1_science)<-c("sigma","tau")
+
+variance2_math <- as.matrix(post_smp_math[,311])
+colnames(variance2_math)<-c("kappa")
+variance2_read <- as.matrix(post_smp_math[,311])
+colnames(variance2_read)<-c("kappa")
+variance2_science <- as.matrix(post_smp_math[,311])
+colnames(variance2_science)<-c("kappa")
+
+variance1_math_plot <- mcmc_areas(variance1_math, prob = 0.95)+ ggtitle("Math")
+variance1_read_plot <- mcmc_areas(variance1_read, prob = 0.95)+ ggtitle("read")
+variance1_science_plot <- mcmc_areas(variance1_science, prob = 0.95)+ ggtitle("science")
+variance2_math_plot <- mcmc_areas(variance2_math, prob = 0.95)
+variance2_read_plot <- mcmc_areas(variance2_read, prob = 0.95)
+variance2_science_plot <- mcmc_areas(variance2_science, prob = 0.95)
+combined_variance_plot <-  ((variance1_math_plot | variance1_read_plot | variance1_science_plot)/(variance2_math_plot | variance2_read_plot | variance2_science_plot)) +
+  plot_annotation(
+    title = "Posterior Distributions of Variance Parameters",
+    theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+  )
+combined_variance_plot
+```
+```{r}
+ggsave(
+  filename = "./plots/posterior_distributions_variance.png",  # File name
+  plot = combined_variance_plot,                              # Plot object
+  width = 12,                                        # Width in inches
+  height = 6,                                        # Height in inches
+  dpi = 300                                          # Resolution in dots per inch
+)
+```
+
+```{r}
+variance_math <- post_smp_math[,309:311]
+colnames(variance_math)<-c("sigma","tau", "kappa")
+variance_read <- post_smp_read[,309:311]
+colnames(variance_read)<-c("sigma","tau", "kappa")
+variance_science <- post_smp_science[,309:311]
+colnames(variance_science)<-c("sigma","tau", "kappa")
+
+# Create individual mcmc_trace plots
+trace_math <- mcmc_trace(variance_math) + ggtitle("Math")
+trace_read <- mcmc_trace(variance_read) + ggtitle("Read")
+trace_science <- mcmc_trace(variance_science) + ggtitle("Science")
+
+# Combine trace plots into a single figure with three columns
+combined_trace_plot <- (trace_math / trace_read / trace_science) +
+  plot_annotation(
+    title = "MCMC Trace Plots for Parameters Across Subjects",
+    theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+  )
+
+# Display the combined trace plot
+combined_trace_plot
+```
+```{r}
+ggsave(
+  filename = "./plots/mcmc_trace_variance_by_row.png",
+  plot = combined_trace_plot,
+  width = 8,
+  height = 8,
+  dpi = 300
+)
+```
+
+
+## posterior check
+
+
+```{r}
+y_pre = as.matrix(post_smp_math[,312:7259])
+y = data_math$math
+pos_check_math = ppd_intervals(y=y_pre,x=y) + geom_abline(intercept = mean(y), slope = 0) +
+ggplot2::labs(y = "Predicted y's", x = "Observed y's") + ggtitle("Math")
+pos_check_math
+```
+
+```{r}
+sg = post_smp_math[,309]
+
+pos_check_mathdiff <-ppd_intervals(t(t(y_pre)-y)/sg,x=y) + geom_abline(intercept = 0, slope = 0) +
+ggplot2::labs(y = "Standardized errors in predicted y's", x = "Observed y's")
+pos_check_mathdiff
+```
+
+```{r}
+y_pre = as.matrix(post_smp_read[,312:7259])
+y = data_read$read
+pos_check_read = ppd_intervals(y=y_pre,x=y) + geom_abline(intercept = mean(y), slope = 0) +
+ggplot2::labs(y = "Predicted y's", x = "Observed y's") + ggtitle("read")
+pos_check_read
+```
+
+```{r}
+sg = post_smp_read[,309]
+
+pos_check_readdiff <-ppd_intervals(t(t(y_pre)-y)/sg,x=y) + geom_abline(intercept = 0, slope = 0) +
+ggplot2::labs(y = "Standardized errors in predicted y's", x = "Observed y's")
+pos_check_readdiff
+```
+
+```{r}
+y_pre = as.matrix(post_smp_science[,312:7259])
+y = data_science$science
+pos_check_science = ppd_intervals(y=y_pre,x=y) + geom_abline(intercept = mean(y), slope = 0) +
+ggplot2::labs(y = "Predicted y's", x = "Observed y's") + ggtitle("science")
+pos_check_science
+```
+
+```{r}
+sg = post_smp_science[,309]
+
+pos_check_sciencediff <-ppd_intervals(t(t(y_pre)-y)/sg,x=y) + geom_abline(intercept = 0, slope = 0) +
+ggplot2::labs(y = "Standardized errors in predicted y's", x = "Observed y's")
+pos_check_sciencediff
+```
+
+
+```{r}
+combined_poscheck_plot <-  ((pos_check_math | pos_check_read | pos_check_science)/(pos_check_mathdiff | pos_check_readdiff | pos_check_sciencediff)) +
+  plot_annotation(
+    title = "Posterior Credible Intervals",
+    theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+  )
+combined_poscheck_plot
+```
+
+```{r}
+ggsave(
+  filename = "./plots/combined_poscheck_plot.png",
+  plot = combined_poscheck_plot,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+```
